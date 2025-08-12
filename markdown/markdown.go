@@ -8,6 +8,7 @@ import (
 	cparser "github.com/kovetskiy/mark/parser"
 	crenderer "github.com/kovetskiy/mark/renderer"
 	"github.com/kovetskiy/mark/stdlib"
+	ctransformer "github.com/kovetskiy/mark/transformer"
 	"github.com/kovetskiy/mark/types"
 	"github.com/reconquest/pkg/log"
 	mkDocsParser "github.com/stefanfritsch/goldmark-admonitions"
@@ -112,6 +113,85 @@ func CompileMarkdown(markdown []byte, stdlib *stdlib.Lib, path string, cfg types
 	html := buf.Bytes()
 
 	log.Tracef(nil, "rendered markdown to html:\n%s", string(html))
+
+	return string(html), confluenceExtension.Attachments
+}
+
+// ConfluenceGHAlertsExtension is a goldmark extension for GitHub Alerts with Transformer approach
+type ConfluenceGHAlertsExtension struct {
+	*ConfluenceExtension
+}
+
+// NewConfluenceGHAlertsExtension creates a new instance of the GitHub Alerts extension
+func NewConfluenceGHAlertsExtension(baseExtension *ConfluenceExtension) *ConfluenceGHAlertsExtension {
+	return &ConfluenceGHAlertsExtension{
+		ConfluenceExtension: baseExtension,
+	}
+}
+
+// Extend extends the Goldmark processor with GitHub Alerts transformer and renderers
+func (c *ConfluenceGHAlertsExtension) Extend(m goldmark.Markdown) {
+	// First add the base extension functionality
+	c.ConfluenceExtension.Extend(m)
+
+	// Add the GitHub Alerts transformer
+	m.Parser().AddOptions(parser.WithASTTransformers(
+		util.Prioritized(ctransformer.NewGHAlertsTransformer(), 100),
+	))
+
+	// Replace the blockquote renderer with the GitHub Alerts aware version
+	m.Renderer().AddOptions(renderer.WithNodeRenderers(
+		util.Prioritized(crenderer.NewConfluenceGHAlertsBlockQuoteRenderer(), 200), // Higher priority than base
+	))
+
+	// Add the text renderer that handles replacement content for GitHub Alerts
+	if slices.Contains(c.ConfluenceExtension.MarkConfig.Features, "ghalerts") || slices.Contains(c.ConfluenceExtension.MarkConfig.Features, "gh-alerts") {
+		m.Renderer().AddOptions(renderer.WithNodeRenderers(
+			util.Prioritized(crenderer.NewConfluenceGHAlertsTextRenderer(c.ConfluenceExtension.MarkConfig.StripNewlines), 200), // Higher priority than base
+		))
+	}
+}
+
+// CompileMarkdownWithTransformer compiles markdown using the transformer approach for GitHub Alerts
+func CompileMarkdownWithTransformer(markdown []byte, stdlib *stdlib.Lib, path string, cfg types.MarkConfig) (string, []attachment.Attachment) {
+	log.Tracef(nil, "rendering markdown with transformer:\n%s", string(markdown))
+
+	// Create base extension
+	confluenceExtension := NewConfluenceExtension(stdlib, path, cfg)
+
+	// Create GitHub Alerts extension that wraps the base extension
+	ghAlertsExtension := NewConfluenceGHAlertsExtension(confluenceExtension)
+
+	converter := goldmark.New(
+		goldmark.WithExtensions(
+			extension.Footnote,
+			extension.DefinitionList,
+			extension.NewTable(
+				extension.WithTableCellAlignMethod(extension.TableCellAlignStyle),
+			),
+			ghAlertsExtension, // Use the GitHub Alerts extension instead of base
+			extension.GFM,
+		),
+		goldmark.WithParserOptions(
+			parser.WithAutoHeadingID(),
+		),
+		goldmark.WithRendererOptions(
+			html.WithUnsafe(),
+			html.WithXHTML(),
+		))
+
+	ctx := parser.NewContext(parser.WithIDs(&cparser.ConfluenceIDs{Values: map[string]bool{}}))
+
+	var buf bytes.Buffer
+	err := converter.Convert(markdown, &buf, parser.WithContext(ctx))
+
+	if err != nil {
+		panic(err)
+	}
+
+	html := buf.Bytes()
+
+	log.Tracef(nil, "rendered markdown to html with transformer:\n%s", string(html))
 
 	return string(html), confluenceExtension.Attachments
 }
