@@ -21,8 +21,9 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
-// Renderer renders anchor [Node]s.
-type ConfluenceExtension struct {
+// ConfluenceLegacyExtension is the original goldmark extension without GitHub Alerts support
+// This extension is preserved for backward compatibility and testing purposes
+type ConfluenceLegacyExtension struct {
 	html.Config
 	Stdlib      *stdlib.Lib
 	Path        string
@@ -30,9 +31,9 @@ type ConfluenceExtension struct {
 	Attachments []attachment.Attachment
 }
 
-// NewConfluenceRenderer creates a new instance of the ConfluenceRenderer
-func NewConfluenceExtension(stdlib *stdlib.Lib, path string, cfg types.MarkConfig) *ConfluenceExtension {
-	return &ConfluenceExtension{
+// NewConfluenceLegacyExtension creates a new instance of the legacy ConfluenceRenderer
+func NewConfluenceLegacyExtension(stdlib *stdlib.Lib, path string, cfg types.MarkConfig) *ConfluenceLegacyExtension {
+	return &ConfluenceLegacyExtension{
 		Config:      html.NewConfig(),
 		Stdlib:      stdlib,
 		Path:        path,
@@ -41,14 +42,14 @@ func NewConfluenceExtension(stdlib *stdlib.Lib, path string, cfg types.MarkConfi
 	}
 }
 
-func (c *ConfluenceExtension) Attach(a attachment.Attachment) {
+func (c *ConfluenceLegacyExtension) Attach(a attachment.Attachment) {
 	c.Attachments = append(c.Attachments, a)
 }
 
-func (c *ConfluenceExtension) Extend(m goldmark.Markdown) {
+func (c *ConfluenceLegacyExtension) Extend(m goldmark.Markdown) {
 
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(
-		util.Prioritized(crenderer.NewConfluenceTextRenderer(c.MarkConfig.StripNewlines), 100),
+		util.Prioritized(crenderer.NewConfluenceTextLegacyRenderer(c.MarkConfig.StripNewlines), 100),
 		util.Prioritized(crenderer.NewConfluenceBlockQuoteRenderer(), 100),
 		util.Prioritized(crenderer.NewConfluenceCodeBlockRenderer(c.Stdlib, c.Path), 100),
 		util.Prioritized(crenderer.NewConfluenceFencedCodeBlockRenderer(c.Stdlib, c, c.MarkConfig), 100),
@@ -78,14 +79,10 @@ func (c *ConfluenceExtension) Extend(m goldmark.Markdown) {
 	))
 }
 
-// CompileMarkdown compiles markdown to Confluence Storage Format with GitHub Alerts support
-// This is the main function that now uses the enhanced GitHub Alerts transformer by default
-// for superior processing of [!NOTE], [!TIP], [!WARNING], [!CAUTION], [!IMPORTANT] syntax
-func CompileMarkdown(markdown []byte, stdlib *stdlib.Lib, path string, cfg types.MarkConfig) (string, []attachment.Attachment) {
-	log.Tracef(nil, "rendering markdown with GitHub Alerts support:\n%s", string(markdown))
-
-	// Use the enhanced GitHub Alerts extension for better processing
-	ghAlertsExtension := NewConfluenceGHAlertsExtension(stdlib, path, cfg)
+// compileMarkdownWithExtension is a shared helper to eliminate code duplication
+// between different compilation approaches
+func compileMarkdownWithExtension(markdown []byte, ext goldmark.Extender, logMessage string) (string, []attachment.Attachment) {
+	log.Tracef(nil, logMessage, string(markdown))
 
 	converter := goldmark.New(
 		goldmark.WithExtensions(
@@ -94,7 +91,7 @@ func CompileMarkdown(markdown []byte, stdlib *stdlib.Lib, path string, cfg types
 			extension.NewTable(
 				extension.WithTableCellAlignMethod(extension.TableCellAlignStyle),
 			),
-			ghAlertsExtension,
+			ext,
 			extension.GFM,
 		),
 		goldmark.WithParserOptions(
@@ -115,57 +112,35 @@ func CompileMarkdown(markdown []byte, stdlib *stdlib.Lib, path string, cfg types
 	}
 
 	html := buf.Bytes()
-
 	log.Tracef(nil, "rendered markdown to html:\n%s", string(html))
 
-	return string(html), ghAlertsExtension.Attachments
+	// We'll return attachments separately - caller handles this
+	return string(html), []attachment.Attachment{}
+}
+
+// CompileMarkdown compiles markdown to Confluence Storage Format with GitHub Alerts support
+// This is the main function that now uses the enhanced GitHub Alerts transformer by default
+// for superior processing of [!NOTE], [!TIP], [!WARNING], [!CAUTION], [!IMPORTANT] syntax
+func CompileMarkdown(markdown []byte, stdlib *stdlib.Lib, path string, cfg types.MarkConfig) (string, []attachment.Attachment) {
+	// Use the enhanced GitHub Alerts extension for better processing
+	ghAlertsExtension := NewConfluenceExtension(stdlib, path, cfg)
+	html, _ := compileMarkdownWithExtension(markdown, ghAlertsExtension, "rendering markdown with GitHub Alerts support:\n%s")
+	return html, ghAlertsExtension.Attachments
 }
 
 // CompileMarkdownLegacy compiles markdown using the legacy approach without GitHub Alerts transformer
 // This function is preserved for backward compatibility and testing purposes
 func CompileMarkdownLegacy(markdown []byte, stdlib *stdlib.Lib, path string, cfg types.MarkConfig) (string, []attachment.Attachment) {
-	log.Tracef(nil, "rendering markdown with legacy renderer:\n%s", string(markdown))
-
-	confluenceExtension := NewConfluenceExtension(stdlib, path, cfg)
-
-	converter := goldmark.New(
-		goldmark.WithExtensions(
-			extension.Footnote,
-			extension.DefinitionList,
-			extension.NewTable(
-				extension.WithTableCellAlignMethod(extension.TableCellAlignStyle),
-			),
-			confluenceExtension,
-			extension.GFM,
-		),
-		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
-		),
-		goldmark.WithRendererOptions(
-			html.WithUnsafe(),
-			html.WithXHTML(),
-		))
-
-	ctx := parser.NewContext(parser.WithIDs(&cparser.ConfluenceIDs{Values: map[string]bool{}}))
-
-	var buf bytes.Buffer
-	err := converter.Convert(markdown, &buf, parser.WithContext(ctx))
-
-	if err != nil {
-		panic(err)
-	}
-
-	html := buf.Bytes()
-
-	log.Tracef(nil, "rendered markdown to html:\n%s", string(html))
-
-	return string(html), confluenceExtension.Attachments
+	confluenceExtension := NewConfluenceLegacyExtension(stdlib, path, cfg)
+	html, _ := compileMarkdownWithExtension(markdown, confluenceExtension, "rendering markdown with legacy renderer:\n%s")
+	return html, confluenceExtension.Attachments
 }
 
-// ConfluenceGHAlertsExtension is a goldmark extension for GitHub Alerts with Transformer approach
+// ConfluenceExtension is a goldmark extension for GitHub Alerts with Transformer approach
 // This extension provides superior GitHub Alert processing by transforming [!NOTE], [!TIP], etc.
 // into proper Confluence macros while maintaining full compatibility with existing functionality.
-type ConfluenceGHAlertsExtension struct {
+// This is now the primary/default extension.
+type ConfluenceExtension struct {
 	html.Config
 	Stdlib      *stdlib.Lib
 	Path        string
@@ -173,10 +148,10 @@ type ConfluenceGHAlertsExtension struct {
 	Attachments []attachment.Attachment
 }
 
-// NewConfluenceGHAlertsExtension creates a new instance of the GitHub Alerts extension
+// NewConfluenceExtension creates a new instance of the GitHub Alerts extension
 // This is the improved standalone version that doesn't depend on feature flags
-func NewConfluenceGHAlertsExtension(stdlib *stdlib.Lib, path string, cfg types.MarkConfig) *ConfluenceGHAlertsExtension {
-	return &ConfluenceGHAlertsExtension{
+func NewConfluenceExtension(stdlib *stdlib.Lib, path string, cfg types.MarkConfig) *ConfluenceExtension {
+	return &ConfluenceExtension{
 		Config:      html.NewConfig(),
 		Stdlib:      stdlib,
 		Path:        path,
@@ -185,7 +160,7 @@ func NewConfluenceGHAlertsExtension(stdlib *stdlib.Lib, path string, cfg types.M
 	}
 }
 
-func (c *ConfluenceGHAlertsExtension) Attach(a attachment.Attachment) {
+func (c *ConfluenceExtension) Attach(a attachment.Attachment) {
 	c.Attachments = append(c.Attachments, a)
 }
 
@@ -194,7 +169,7 @@ func (c *ConfluenceGHAlertsExtension) Attach(a attachment.Attachment) {
 // 1. Core renderers for standard markdown elements
 // 2. GitHub Alerts specific renderers (blockquote and text) with higher priority
 // 3. GitHub Alerts AST transformer for preprocessing
-func (c *ConfluenceGHAlertsExtension) Extend(m goldmark.Markdown) {
+func (c *ConfluenceExtension) Extend(m goldmark.Markdown) {
 	// Register core renderers (excluding blockquote and text which we'll replace)
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(
 		util.Prioritized(crenderer.NewConfluenceCodeBlockRenderer(c.Stdlib, c.Path), 100),
@@ -210,7 +185,7 @@ func (c *ConfluenceGHAlertsExtension) Extend(m goldmark.Markdown) {
 	// These renderers handle both GitHub Alerts and legacy blockquote syntax
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(
 		util.Prioritized(crenderer.NewConfluenceGHAlertsBlockQuoteRenderer(), 200),
-		util.Prioritized(crenderer.NewConfluenceGHAlertsTextRenderer(c.MarkConfig.StripNewlines), 200),
+		util.Prioritized(crenderer.NewConfluenceTextRenderer(c.MarkConfig.StripNewlines), 200),
 	))
 
 	// Add the GitHub Alerts AST transformer that preprocesses [!TYPE] syntax
@@ -240,44 +215,9 @@ func (c *ConfluenceGHAlertsExtension) Extend(m goldmark.Markdown) {
 // CompileMarkdownWithTransformer compiles markdown using the transformer approach for GitHub Alerts
 // This function provides enhanced GitHub Alert processing while maintaining full compatibility
 // with existing markdown functionality. It transforms [!NOTE], [!TIP], etc. into proper titles.
+// This is an alias for CompileMarkdown for backward compatibility.
 func CompileMarkdownWithTransformer(markdown []byte, stdlib *stdlib.Lib, path string, cfg types.MarkConfig) (string, []attachment.Attachment) {
-	log.Tracef(nil, "rendering markdown with GitHub Alerts transformer:\n%s", string(markdown))
-
-	// Create the GitHub Alerts extension with improved standalone implementation
-	ghAlertsExtension := NewConfluenceGHAlertsExtension(stdlib, path, cfg)
-
-	converter := goldmark.New(
-		goldmark.WithExtensions(
-			extension.Footnote,
-			extension.DefinitionList,
-			extension.NewTable(
-				extension.WithTableCellAlignMethod(extension.TableCellAlignStyle),
-			),
-			ghAlertsExtension, // Use the GitHub Alerts extension
-			extension.GFM,
-		),
-		goldmark.WithParserOptions(
-			parser.WithAutoHeadingID(),
-		),
-		goldmark.WithRendererOptions(
-			html.WithUnsafe(),
-			html.WithXHTML(),
-		))
-
-	ctx := parser.NewContext(parser.WithIDs(&cparser.ConfluenceIDs{Values: map[string]bool{}}))
-
-	var buf bytes.Buffer
-	err := converter.Convert(markdown, &buf, parser.WithContext(ctx))
-
-	if err != nil {
-		panic(err)
-	}
-
-	html := buf.Bytes()
-
-	log.Tracef(nil, "rendered markdown to html with GitHub Alerts transformer:\n%s", string(html))
-
-	return string(html), ghAlertsExtension.Attachments
+	return CompileMarkdown(markdown, stdlib, path, cfg)
 }
 
 // Approach 2: Decorator Pattern Implementation

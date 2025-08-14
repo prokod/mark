@@ -60,10 +60,8 @@ func (c *StandaloneGHAlertsExtension) Extend(m goldmark.Markdown) {
 	// Add GitHub Alerts specific renderers with higher priority
 	m.Renderer().AddOptions(renderer.WithNodeRenderers(
 		util.Prioritized(crenderer.NewConfluenceGHAlertsBlockQuoteRenderer(), 200),
-		util.Prioritized(crenderer.NewConfluenceGHAlertsTextRenderer(c.MarkConfig.StripNewlines), 200),
-	))
-
-	// Add the GitHub Alerts transformer
+		util.Prioritized(crenderer.NewConfluenceTextRenderer(c.MarkConfig.StripNewlines), 200),
+	)) // Add the GitHub Alerts transformer
 	m.Parser().AddOptions(parser.WithASTTransformers(
 		util.Prioritized(ctransformer.NewGHAlertsTransformer(), 100),
 	))
