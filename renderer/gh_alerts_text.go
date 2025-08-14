@@ -9,14 +9,18 @@ import (
 
 type ConfluenceGHAlertsTextRenderer struct {
 	html.Config
-	StripNewlines bool
+	softBreak byte
 }
 
 // NewConfluenceGHAlertsTextRenderer creates a new instance of the renderer for GitHub Alerts text
 func NewConfluenceGHAlertsTextRenderer(stripNewlines bool, opts ...html.Option) renderer.NodeRenderer {
+	sb := '\n'
+	if stripNewlines {
+		sb = ' '
+	}
 	return &ConfluenceGHAlertsTextRenderer{
-		Config:        html.NewConfig(),
-		StripNewlines: stripNewlines,
+		Config:    html.NewConfig(),
+		softBreak: byte(sb),
 	}
 }
 
@@ -43,38 +47,23 @@ func (r *ConfluenceGHAlertsTextRenderer) renderText(writer util.BufWriter, sourc
 		}
 	}
 
-	// Default text rendering behavior
+	// Default text rendering behavior (same as original ConfluenceTextRenderer)
 	segment := n.Segment
-	value := segment.Value(source)
-
-	if r.StripNewlines {
-		value = []byte(stripNewlines(value))
-	}
-
 	if n.IsRaw() {
-		r.Writer.RawWrite(writer, value)
+		r.Writer.RawWrite(writer, segment.Value(source))
 	} else {
+		value := segment.Value(source)
 		r.Writer.Write(writer, value)
-	}
-
-	if n.SoftLineBreak() {
-		if r.HardWraps {
-			r.Writer.RawWrite(writer, []byte("<br />\n"))
-		} else {
-			r.Writer.RawWrite(writer, []byte("\n"))
+		if n.HardLineBreak() || (n.SoftLineBreak() && r.HardWraps) {
+			if r.XHTML {
+				_, _ = writer.WriteString("<br />\n")
+			} else {
+				_, _ = writer.WriteString("<br>\n")
+			}
+		} else if n.SoftLineBreak() {
+			_ = writer.WriteByte(r.softBreak)
 		}
 	}
 
 	return ast.WalkContinue, nil
-}
-
-// stripNewlines removes newline characters from the text
-func stripNewlines(value []byte) string {
-	result := make([]byte, 0, len(value))
-	for _, b := range value {
-		if b != '\n' && b != '\r' {
-			result = append(result, b)
-		}
-	}
-	return string(result)
 }

@@ -135,7 +135,7 @@ func (t *GHAlertsTransformer) removeAlertSyntax(paragraph *ast.Paragraph, alertT
 
 	// We'll store the replacement content in the node attributes
 	// The renderer can use this to generate the correct output
-	leftText.SetAttribute([]byte("replacement-content"), []byte(" "))
+	leftText.SetAttribute([]byte("replacement-content"), []byte(""))
 	middleText.SetAttribute([]byte("replacement-content"), []byte(title))
-	rightText.SetAttribute([]byte("replacement-content"), []byte(" "))
+	rightText.SetAttribute([]byte("replacement-content"), []byte(""))
 }
