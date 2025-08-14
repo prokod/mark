@@ -83,11 +83,11 @@ func TestGHAlertsTransformerVsLegacyRenderer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Logf("Testing: %s", tc.description)
 
-			// Test with standalone transformer
-			transformerResult, transformerAttachments := mark.CompileMarkdownWithGHAlertsTransformer([]byte(tc.markdown), stdlib, "/test", cfg)
+			// Test with GitHub Alerts transformer (primary approach)
+			transformerResult, transformerAttachments := mark.CompileMarkdown([]byte(tc.markdown), stdlib, "/test", cfg)
 
 			// Test with legacy renderer
-			legacyResult, legacyAttachments := mark.CompileMarkdownWithLegacyRenderer([]byte(tc.markdown), stdlib, "/test", cfg)
+			legacyResult, legacyAttachments := mark.CompileMarkdownLegacy([]byte(tc.markdown), stdlib, "/test", cfg)
 
 			// Basic checks
 			assert.NotEmpty(t, transformerResult, "Transformer result should not be empty")
@@ -98,13 +98,18 @@ func TestGHAlertsTransformerVsLegacyRenderer(t *testing.T) {
 			// Check for Confluence macro presence
 			if tc.expectMacro {
 				assert.Contains(t, transformerResult, "structured-macro", "Transformer should produce Confluence macro")
-				assert.Contains(t, legacyResult, "structured-macro", "Legacy renderer should produce Confluence macro")
+				// Legacy renderer should NOT handle GitHub Alert syntax - it should treat as plain blockquote
+				if tc.expectClean {
+					// This is a GitHub Alert case - legacy should produce blockquote, transformer should produce macro
+					assert.Contains(t, legacyResult, "<blockquote>", "Legacy renderer should treat GitHub Alerts as regular blockquotes")
+				} else {
+					// This is a legacy syntax case (like "info:") - both should produce macro
+					assert.Contains(t, legacyResult, "structured-macro", "Legacy renderer should produce Confluence macro for legacy syntax")
+				}
 			} else {
 				assert.Contains(t, transformerResult, "<blockquote>", "Regular blockquote should use HTML blockquote")
 				assert.Contains(t, legacyResult, "<blockquote>", "Regular blockquote should use HTML blockquote")
-			}
-
-			// Check for GitHub Alert syntax cleanup (only for transformer with GitHub Alert syntax)
+			} // Check for GitHub Alert syntax cleanup (only for transformer with GitHub Alert syntax)
 			if tc.expectClean {
 				// Transformer should clean up the [!TYPE] syntax
 				assert.NotContains(t, transformerResult, "[!", "Transformer should remove GitHub Alert syntax markers")
@@ -136,7 +141,7 @@ func TestBasicTransformerFunctionality(t *testing.T) {
 		DropFirstH1:   false,
 	}
 
-	result, attachments := mark.CompileMarkdownWithGHAlertsTransformer([]byte(testMarkdown), stdlib, "/test", cfg)
+	result, attachments := mark.CompileMarkdown([]byte(testMarkdown), stdlib, "/test", cfg)
 
 	// Basic checks
 	assert.NotEmpty(t, result)
@@ -263,11 +268,11 @@ Line 3`,
 				t.Fatalf("Failed to create stdlib: %v", err)
 			}
 
-			// Test with new standalone transformer
-			transformerResult, transformerAttachments := mark.CompileMarkdownWithGHAlertsTransformer([]byte(tc.markdown), stdlib, "/test", tc.config)
+			// Test with GitHub Alerts transformer (primary approach)
+			transformerResult, transformerAttachments := mark.CompileMarkdown([]byte(tc.markdown), stdlib, "/test", tc.config)
 
 			// Test with legacy renderer (original approach)
-			legacyResult, legacyAttachments := mark.CompileMarkdownWithLegacyRenderer([]byte(tc.markdown), stdlib, "/test", tc.config)
+			legacyResult, legacyAttachments := mark.CompileMarkdownLegacy([]byte(tc.markdown), stdlib, "/test", tc.config)
 
 			// Basic checks
 			assert.NotEmpty(t, transformerResult, "Transformer result should not be empty")
